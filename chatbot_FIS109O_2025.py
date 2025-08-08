@@ -23,6 +23,7 @@ lista_estudiantes = [
 ]
 
 st.markdown("Este chatbot responde preguntas de contenidos del curso FIS109O - Física para Odontología. Por favor, ingresa tu correo UC para comenzar.")
+st.warning("🔒 Toda pregunta enviada será registrada con fines educativos y podrá ser revisada por el equipo docente del curso.")
 
 correo = st.text_input("Correo UC:")
 
@@ -56,18 +57,25 @@ Si no sabes algo o si una pregunta excede tu alcance, sugiere al estudiante cons
                 st.success("Respuesta del Chatbot:")
 
                 for linea in respuesta.split("\n"):
-                    if re.fullmatch(r"\$\$.*\$\$", linea) or re.fullmatch(r"\$.*\$", linea):
-                        st.latex(linea.strip("$"))
+                    linea = linea.strip()
+
+                    # Caso 1: línea solo con ecuación tipo \[ ... \] o $$...$$ o $...$
+                    if re.fullmatch(r"\\\[.*\\\]", linea) or re.fullmatch(r"\$\$.*\$\$", linea) or re.fullmatch(r"\$.*\$", linea):
+                        latex_expr = re.sub(r"^\\\[|\\\]$|^\$\$?|\$?$", "", linea).strip()
+                        st.latex(latex_expr)
+
+                    # Caso 2: ecuaciones incrustadas dentro del texto
                     else:
-                        partes = re.split(r"(\$.*?\$)", linea)
+                        partes = re.split(r"(\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$)", linea)
                         if len(partes) > 1:
                             texto_buffer = ""
                             for parte in partes:
-                                if parte.startswith("$") and parte.endswith("$"):
+                                if re.fullmatch(r"\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$", parte):
                                     if texto_buffer:
                                         st.write(texto_buffer)
                                         texto_buffer = ""
-                                    st.latex(parte.strip("$"))
+                                    latex_expr = re.sub(r"^\\\[|\\\]$|^\$\$?|\$?$", "", parte).strip()
+                                    st.latex(latex_expr)
                                 else:
                                     texto_buffer += parte
                             if texto_buffer:
@@ -84,5 +92,15 @@ Si no sabes algo o si una pregunta excede tu alcance, sugiere al estudiante cons
 
             except Exception as e:
                 st.error(f"Ocurrió un error: {e}")
+
+    if correo == "alejandro.varas@uc.cl" and os.path.exists("registro_chat_fis109o.csv"):
+        with open("registro_chat_fis109o.csv", "rb") as f:
+            st.download_button(
+                label="📥 Descargar registro de interacciones (.csv)",
+                data=f,
+                file_name="registro_chat_fis109o.csv",
+                mime="text/csv"
+            )
+
 else:
     st.info("Por favor, ingresa tu correo UC para comenzar.")
