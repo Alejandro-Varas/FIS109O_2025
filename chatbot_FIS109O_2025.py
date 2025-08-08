@@ -27,6 +27,95 @@ st.warning("🔒 Toda pregunta enviada será registrada con fines educativos y p
 
 correo = st.text_input("Correo UC:")
 
+def contiene_latex(s: str) -> bool:
+    return bool(re.search(r"\\(vec|frac|sqrt|hat|bar|overline|underline|cdot|times|sin|cos|tan|alpha|beta|gamma|theta|pi|sum|int|partial)\b|[\^_]", s))
+
+def render_segmento_texto_con_parentesis(texto: str):
+    # Divide por paréntesis y renderiza como LaTeX si dentro hay comandos típicos
+    partes = re.split(r"(\([^()]*\))", texto)  # conserva ( ... )
+    if len(partes) == 1:
+        st.write(texto if texto else "")
+        return
+    buffer_txt = ""
+    for p in partes:
+        if re.fullmatch(r"\([^()]*\)", p or ""):
+            # quitar paréntesis exteriores
+            interior = p[1:-1]
+            if contiene_latex(interior):
+                if buffer_txt:
+                    st.write(buffer_txt); buffer_txt = ""
+                st.latex(interior.strip())
+            else:
+                buffer_txt += p
+        else:
+            buffer_txt += p
+    if buffer_txt:
+        st.write(buffer_txt)
+
+def render_with_math(texto:str):
+    lineas = texto.split("\n")
+    en_bloque_corchetes = False
+    acumulador = []
+
+    def render_line(linea):
+        linea = linea.strip()
+        # Bloques completos en una línea: \[...\] o $$...$$
+        if re.fullmatch(r"\\\[.*\\\]", linea) or re.fullmatch(r"\$\$.*\$\$", linea):
+            st.latex(re.sub(r"^\\\[|\\\]$|^\$\$|\$\$$", "", linea).strip()); return
+        # Línea sólo $...$
+        if re.fullmatch(r"\$.*\$", linea):
+            st.latex(linea.strip("$")); return
+        # Inline: separar por $...$, $$...$$ o \[...\]
+        partes = re.split(r"(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\])", linea)
+        if len(partes) > 1:
+            buffer_txt = ""
+            for p in partes:
+                if re.fullmatch(r"\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]", p):
+                    if buffer_txt:
+                        # procesar posibles paréntesis con LaTeX en el texto acumulado
+                        render_segmento_texto_con_parentesis(buffer_txt)
+                        buffer_txt = ""
+                    st.latex(re.sub(r"^\\\[|\\\]$|^\$\$|\$\$|^\$|\$$", "", p).strip())
+                else:
+                    buffer_txt += p
+            if buffer_txt:
+                render_segmento_texto_con_parentesis(buffer_txt)
+        else:
+            # Si no hay delimitadores LaTeX, revisar si hay paréntesis con LaTeX dentro
+            if contiene_latex(linea):
+                # Intentar detectar bloques \[ ... \] dentro de la línea
+                m = re.search(r"\\\[(.*?)\\\]", linea)
+                if m:
+                    antes = linea[:m.start()]; dentro = m.group(1); despues = linea[m.end():]
+                    if antes: render_segmento_texto_con_parentesis(antes)
+                    st.latex(dentro.strip())
+                    if despues: render_segmento_texto_con_parentesis(despues)
+                else:
+                    render_segmento_texto_con_parentesis(linea)
+            else:
+                st.write(linea)
+
+    for ln in lineas:
+        s = ln.strip()
+        # Soportar bloque estilo:
+        # [
+        #   <latex>
+        # ]
+        if not en_bloque_corchetes and s == "[":
+            en_bloque_corchetes = True; acumulador = []; continue
+        if en_bloque_corchetes:
+            if s == "]":
+                bloque = "\n".join(acumulador).strip()
+                st.latex(bloque)
+                en_bloque_corchetes = False; acumulador = []
+            else:
+                acumulador.append(ln)
+        else:
+            render_line(ln)
+
+    if en_bloque_corchetes and acumulador:
+        st.write("\n".join(acumulador))
+
 if correo:
     correo = correo.lower().strip()
     if correo not in lista_estudiantes:
@@ -46,49 +135,25 @@ Eres FIS109O Assistant, un asistente académico para estudiantes de Odontología
 
 Tu función principal es explicar con claridad y rigor los contenidos del curso: mecánica, fluidos, electricidad, ondas y radiación, enfocados en su aplicación clínica. Usas analogías relevantes como palancas mandibulares, irrigadores dentales, presión en jeringas, entre otros.
 
-Te comunicas en español neutro, con matices chilenos, en un tono académico, claro, respetuoso y cercano. Apoyas el aprendizaje paso a paso, fomentas el pensamiento crítico, y ayudas a resolver dudas conceptuales y ejercicios.
+Formato de ecuaciones (OBLIGATORIO):
+- Para matemáticas en línea usa: $ ... $
+- Para ecuaciones en bloque usa: \[ ... \]  (o $$ ... $$)
+- No uses corchetes literales "[" y "]" para delimitar ecuaciones.
+- No dejes expresiones LaTeX sin $ o \[ \].
 
-Si no sabes algo o si una pregunta excede tu alcance, sugiere al estudiante consultar con el equipo docente. Nunca inventas información.
+Te comunicas en español neutro, con matices chilenos, en un tono académico, claro, respetuoso y cercano. Apoyas el aprendizaje paso a paso, fomentas el pensamiento crítico, y ayudas a resolver dudas conceptuales y ejercicios. Si no sabes algo o si una pregunta excede tu alcance, sugiere al estudiante consultar con el equipo docente. Nunca inventas información.
 """},
                         {"role": "user", "content": pregunta}
                     ]
                 )
                 respuesta = response["choices"][0]["message"]["content"]
                 st.success("Respuesta del Chatbot:")
-
-                for linea in respuesta.split("\n"):
-                    linea = linea.strip()
-
-                    # Caso 1: línea solo con ecuación tipo \[ ... \] o $$...$$ o $...$
-                    if re.fullmatch(r"\\\[.*\\\]", linea) or re.fullmatch(r"\$\$.*\$\$", linea) or re.fullmatch(r"\$.*\$", linea):
-                        latex_expr = re.sub(r"^\\\[|\\\]$|^\$\$?|\$?$", "", linea).strip()
-                        st.latex(latex_expr)
-
-                    # Caso 2: ecuaciones incrustadas dentro del texto
-                    else:
-                        partes = re.split(r"(\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$)", linea)
-                        if len(partes) > 1:
-                            texto_buffer = ""
-                            for parte in partes:
-                                if re.fullmatch(r"\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$", parte):
-                                    if texto_buffer:
-                                        st.write(texto_buffer)
-                                        texto_buffer = ""
-                                    latex_expr = re.sub(r"^\\\[|\\\]$|^\$\$?|\$?$", "", parte).strip()
-                                    st.latex(latex_expr)
-                                else:
-                                    texto_buffer += parte
-                            if texto_buffer:
-                                st.write(texto_buffer)
-                        else:
-                            st.write(linea)
+                render_with_math(respuesta)
 
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 registro = [now, correo, pregunta, respuesta]
-
                 with open("registro_chat_fis109o.csv", "a", encoding="utf-8", newline="") as f:
-                    writer = csv.writer(f)
-                    writer.writerow(registro)
+                    writer = csv.writer(f); writer.writerow(registro)
 
             except Exception as e:
                 st.error(f"Ocurrió un error: {e}")
