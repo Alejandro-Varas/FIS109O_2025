@@ -1,7 +1,9 @@
+
 import streamlit as st
 import openai
 import csv
 import os
+import re
 from datetime import datetime
 
 st.set_page_config(page_title="Chatbot FIS109O", page_icon="🦷")
@@ -20,7 +22,7 @@ lista_estudiantes = [
     "alejandro.varas@uc.cl"
 ]
 
-st.markdown("Este chatbot responde preguntas relacionadas con el curso FIS109O - Física para Odontología. Por favor, ingresa tu correo UC para comenzar.")
+st.markdown("Este chatbot responde preguntas de contenidos del curso FIS109O - Física para Odontología. Por favor, ingresa tu correo UC para comenzar.")
 
 correo = st.text_input("Correo UC:")
 
@@ -30,7 +32,7 @@ if correo:
         st.warning("Este correo no está autorizado para usar el chatbot.")
         st.stop()
 
-    pregunta = st.text_area("Escribe tu pregunta:", height=150)
+    pregunta = st.text_area("Escribe tu pregunta sobre contenidos del curso:", height=150)
 
     if st.button("Preguntar") and pregunta.strip() != "":
         with st.spinner("Pensando..."):
@@ -39,14 +41,39 @@ if correo:
                     model="gpt-4o",
                     messages=[
                         {"role": "system", "content": f"""
-Eres FIS109O Assistant, el asistente académico del curso Física para Odontología (FIS109O) de la Pontificia Universidad Católica de Chile. Respondes en español neutro, con un tono académico, claro y respetuoso. Apoyas el aprendizaje con ejemplos clínicos y nunca inventas información. Si no sabes algo, sugieres consultar con el profesor o ayudantes.
+Eres FIS109O Assistant, un asistente académico para estudiantes de Odontología en el curso Física para Odontología (FIS109O) de la Pontificia Universidad Católica de Chile.
+
+Tu función principal es explicar con claridad y rigor los contenidos del curso: mecánica, fluidos, electricidad, ondas y radiación, enfocados en su aplicación clínica. Usas analogías relevantes como palancas mandibulares, irrigadores dentales, presión en jeringas, entre otros.
+
+Te comunicas en español neutro, con matices chilenos, en un tono académico, claro, respetuoso y cercano. Apoyas el aprendizaje paso a paso, fomentas el pensamiento crítico, y ayudas a resolver dudas conceptuales y ejercicios.
+
+Si no sabes algo o si una pregunta excede tu alcance, sugiere al estudiante consultar con el equipo docente. Nunca inventas información.
 """},
                         {"role": "user", "content": pregunta}
                     ]
                 )
                 respuesta = response["choices"][0]["message"]["content"]
                 st.success("Respuesta del Chatbot:")
-                st.write(respuesta)
+
+                for linea in respuesta.split("\n"):
+                    if re.fullmatch(r"\$\$.*\$\$", linea) or re.fullmatch(r"\$.*\$", linea):
+                        st.latex(linea.strip("$"))
+                    else:
+                        partes = re.split(r"(\$.*?\$)", linea)
+                        if len(partes) > 1:
+                            texto_buffer = ""
+                            for parte in partes:
+                                if parte.startswith("$") and parte.endswith("$"):
+                                    if texto_buffer:
+                                        st.write(texto_buffer)
+                                        texto_buffer = ""
+                                    st.latex(parte.strip("$"))
+                                else:
+                                    texto_buffer += parte
+                            if texto_buffer:
+                                st.write(texto_buffer)
+                        else:
+                            st.write(linea)
 
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 registro = [now, correo, pregunta, respuesta]
