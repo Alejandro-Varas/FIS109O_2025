@@ -47,6 +47,8 @@ st.warning("🔒 Toda pregunta enviada será registrada con fines educativos y p
 correo = st.text_input("Correo UC:")
 
 # ---------- Utilidades ----------
+LATEX_CMD_PATTERN = re.compile(r"\\[A-Za-z]+")  # para heurística de rescate
+
 def latex_transform(expr: str) -> str:
     # --- Unicode -> LaTeX ---
     expr = expr.replace("θ", r"\theta").replace("Θ", r"\Theta")
@@ -55,7 +57,7 @@ def latex_transform(expr: str) -> str:
     # --- funciones trigonométricas "desnudas" -> \sin, \cos, \tan ---
     expr = re.sub(r"(?<!\\)\b(sin|cos|tan)\b", r"\\\1", expr)
 
-    # --- Mapeos para unitarios cartesianos (i, j, k) a x, y, z ---
+    # --- Mapeos unitarios i, j, k -> x, y, z ---
     expr = re.sub(r"\\mathbf\{\s*i\s*\}", r"\\hat{x}", expr)
     expr = re.sub(r"\\mathbf\{\s*j\s*\}", r"\\hat{y}", expr)
     expr = re.sub(r"\\mathbf\{\s*k\s*\}", r"\\hat{z}", expr)
@@ -85,19 +87,34 @@ def preprocess_nonmath_segment(seg: str) -> str:
     return seg
 
 def render_with_math(texto: str):
-    # Normalizar bloques [...] en cualquier parte del texto
+    # Normalizar saltos de línea
+    texto = texto.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Normalizar bloques [...] multi-línea -> \[...\]
     texto = re.sub(r"(?s)\[\s*\n(.*?)\n\s*\]", r"\\[\1\\]", texto)
+    # También normalizar bloques en UNA sola línea: [ ... ] -> \[ ... \]
+    texto = re.sub(r"\[\s*([^\[\]\n]+?)\s*\]", r"\\[\1\\]", texto)
 
     for ln in texto.split("\n"):
-        # Separar por entornos matemáticos inline/bloque
-        partes = re.split(r"(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\])", ln)
-        if len(partes) > 1:
+        # Si la línea ya contiene delimitadores matemáticos reconocidos
+        if re.search(r"\$\$.*\$\$|\$.*\$|\\\[.*\\\]", ln):
+            # Separar por entornos matemáticos y renderizar cada parte
+            partes = re.split(r"(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\])", ln)
             for p in partes:
                 if re.fullmatch(r"\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]", p):
                     contenido = re.sub(r"^\\\[|\\\]$|^\$\$|\$\$$|^\$|\$$", "", p).strip()
                     st.latex(latex_transform(contenido))
-                else:
+                elif p:
                     st.write(preprocess_nonmath_segment(p))
+            continue
+
+        # Si NO hay delimitadores, pero parece LaTeX (heurística): renderízalo como bloque
+        if LATEX_CMD_PATTERN.search(ln):
+            contenido = ln.strip()
+            if contenido:
+                st.latex(latex_transform(contenido))
+            else:
+                st.write("")
         else:
             st.write(preprocess_nonmath_segment(ln))
 
@@ -113,6 +130,7 @@ if correo:
     if st.button("Preguntar") and pregunta.strip():
         with st.spinner("Pensando..."):
             try:
+                # NOTA: Si usas openai>=1.0, cambia este bloque por el nuevo cliente
                 response = openai.ChatCompletion.create(
                     model="gpt-4o",
                     messages=[
