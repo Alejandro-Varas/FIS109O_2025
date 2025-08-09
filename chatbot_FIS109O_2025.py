@@ -48,11 +48,17 @@ correo = st.text_input("Correo UC:")
 
 # ---------- Utilidades ----------
 def latex_transform(expr: str) -> str:
+    # --- Unicode -> LaTeX ---
+    expr = expr.replace("θ", r"\theta").replace("Θ", r"\Theta")
+    expr = re.sub(r"(\d+)\s*[°º∘]", r"\1^{\\circ}", expr)
+
+    # --- funciones trigonométricas "desnudas" -> \sin, \cos, \tan ---
+    expr = re.sub(r"(?<!\\)\b(sin|cos|tan)\b", r"\\\1", expr)
+
     # --- Mapeos para unitarios cartesianos (i, j, k) a x, y, z ---
     expr = re.sub(r"\\mathbf\{\s*i\s*\}", r"\\hat{x}", expr)
     expr = re.sub(r"\\mathbf\{\s*j\s*\}", r"\\hat{y}", expr)
     expr = re.sub(r"\\mathbf\{\s*k\s*\}", r"\\hat{z}", expr)
-    # Variantes: \hat{i}, \hat{\imath}, \vec{i}
     expr = re.sub(r"(\\hat\{\s*i\s*\}|\\hat\s+i\b|\\hat\{\s*\\imath\s*\}|\\vec\{\s*i\s*\}|\\vec\s+i\b)", r"\\hat{x}", expr)
     expr = re.sub(r"(\\hat\{\s*j\s*\}|\\hat\s+j\b|\\hat\{\s*\\jmath\s*\}|\\vec\{\s*j\s*\}|\\vec\s+j\b)", r"\\hat{y}", expr)
     expr = re.sub(r"(\\hat\{\s*k\s*\}|\\hat\s+k\b|\\vec\{\s*k\s*\}|\\vec\s+k\b)", r"\\hat{z}", expr)
@@ -68,10 +74,14 @@ def latex_transform(expr: str) -> str:
     return expr
 
 def preprocess_nonmath_segment(seg: str) -> str:
-    seg = re.sub(r"\*\*([A-Za-z])\*\*", r"$\\vec{\1}$", seg)  # **v** -> \vec{v}
-    seg = re.sub(r"\b([A-Za-z])_([A-Za-z0-9]+)\b", r"$\1_{\2}$", seg)  # v_x -> v_{x}
-    seg = re.sub(r"(?i)(vector)\s+([a-zA-Z])(\b)", r"\1 $\\vec{\2}$\3", seg)  # "vector v" -> \vec{v}
-    seg = re.sub(r"\(\s*([A-Za-z])\s*\)", r"$(\1)$", seg)  # ( x ) -> $(x)$
+    # **v** -> $\vec{v}$  (solo una letra)
+    seg = re.sub(r"\*\*([A-Za-z])\*\*", r"$\\vec{\1}$", seg)
+    # v_x -> $v_{x}$
+    seg = re.sub(r"\b([A-Za-z])_([A-Za-z0-9]+)\b", r"$\1_{\2}$", seg)
+    # "vector v" -> "vector \vec{v}"
+    seg = re.sub(r"(?i)(vector)\s+([a-zA-Z])(\b)", r"\1 $\\vec{\2}$\3", seg)
+    # ( x ) -> $(x)$  (incluye θ)
+    seg = re.sub(r"\(\s*([A-Za-zθΘ])\s*\)", r"$(\1)$", seg)
     return seg
 
 def render_with_math(texto: str):
