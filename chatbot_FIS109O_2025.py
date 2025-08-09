@@ -1,10 +1,15 @@
 
 import streamlit as st
-import openai
 import csv
 import os
 import re
 from datetime import datetime
+
+# --- OpenAI >= 1.0 client ---
+try:
+    from openai import OpenAI
+except Exception as _e:
+    OpenAI = None
 
 # ---------- PROMPT PEDAGÓGICO ----------
 PEDAGOGICAL_PROMPT = """
@@ -13,13 +18,13 @@ Eres FIS109O Assistant, un asistente académico para estudiantes de Odontología
 Tu función principal es explicar con claridad y rigor los contenidos del curso: mecánica, fluidos, electricidad, ondas y radiación, enfocados en su aplicación clínica. Usas analogías relevantes como palancas mandibulares, irrigadores dentales, presión en jeringas, entre otros.
 
 Formato de ecuaciones (OBLIGATORIO):
-- Para matemáticas en línea usa: $ ... $
-- Para ecuaciones en bloque usa: \[ ... \]  (o $$ ... $$)
+- Para matemáticas en línea usa: $ ... $ o \\( ... \\)
+- Para ecuaciones en bloque usa: \\[ ... \\]  (o $$ ... $$)
 - No uses Markdown (negritas/cursivas) para notación matemática.
-- Escribe vectores con flecha: \vec{v}, \vec{F}, etc.
-- Escribe vectores unitarios cartesianos como: \hat{x}, \hat{y}, \hat{z}.
+- Escribe vectores con flecha: \\vec{v}, \\vec{F}, etc.
+- Escribe vectores unitarios cartesianos como: \\hat{x}, \\hat{y}, \\hat{z}.
 - No uses corchetes literales "[" y "]" para delimitar ecuaciones.
-- No dejes expresiones LaTeX sin $ o \[ \].
+- No dejes expresiones LaTeX sin $ o \\[ \\].
 
 Te comunicas en español neutro, con matices chilenos, en un tono académico, claro, respetuoso y cercano. Apoyas el aprendizaje paso a paso, fomentas el pensamiento crítico, y ayudas a resolver dudas conceptuales y ejercicios. Si no sabes algo o si una pregunta excede tu alcance, sugiere al estudiante consultar con el equipo docente. Nunca inventas información.
 """
@@ -28,7 +33,20 @@ Te comunicas en español neutro, con matices chilenos, en un tono académico, cl
 st.set_page_config(page_title="Chatbot FIS109O", page_icon="🦷")
 st.title("🦷 Chatbot Educativo - Física para Odontología")
 
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+if "OPENAI_API_KEY" not in st.secrets:
+    st.error("Falta OPENAI_API_KEY en Settings → Secrets.")
+    st.stop()
+
+client = None
+if OpenAI is not None:
+    try:
+        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    except Exception as e:
+        st.error(f"No se pudo inicializar el cliente OpenAI: {e}")
+        st.stop()
+else:
+    st.error("La librería openai>=1.0 no está disponible. Agrega 'openai>=1.40.0' en requirements.txt y vuelve a desplegar.")
+    st.stop()
 
 LISTA_ESTUDIANTES = [
     "ana.perez@uc.cl",
@@ -90,31 +108,34 @@ def render_with_math(texto: str):
     # Normalizar saltos de línea
     texto = texto.replace("\r\n", "\n").replace("\r", "\n")
 
-    # Normalizar bloques [...] multi-línea -> \[...\]
+    # Normalizar bloques [...] -> \[...\] (multi-línea y una línea)
     texto = re.sub(r"(?s)\[\s*\n(.*?)\n\s*\]", r"\\[\1\\]", texto)
-    # También normalizar bloques en UNA sola línea: [ ... ] -> \[ ... \]
     texto = re.sub(r"\[\s*([^\[\]\n]+?)\s*\]", r"\\[\1\\]", texto)
 
+    # Quitar líneas sueltas con "[" o "]"
+    texto = re.sub(r"(?m)^\s*\[\s*\]\s*$", "", texto)
+    texto = re.sub(r"(?m)^\s*\[\s*$", "", texto)
+    texto = re.sub(r"(?m)^\s*\]\s*$", "", texto)
+
     for ln in texto.split("\n"):
-        # Si la línea ya contiene delimitadores matemáticos reconocidos
-        if re.search(r"\$\$.*\$\$|\$.*\$|\\\[.*\\\]", ln):
-            # Separar por entornos matemáticos y renderizar cada parte
-            partes = re.split(r"(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\])", ln)
+        if not ln.strip():
+            st.write("")
+            continue
+
+        # Fragmentar por delimitadores: $$...$$, $...$, \[...\], \(...\)
+        partes = re.split(r"(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]|\\\([^\)]+\\\))", ln)
+        if len(partes) > 1:
             for p in partes:
-                if re.fullmatch(r"\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]", p):
-                    contenido = re.sub(r"^\\\[|\\\]$|^\$\$|\$\$$|^\$|\$$", "", p).strip()
+                if re.fullmatch(r"\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]|\\\([^\)]+\\\)", p or ""):
+                    contenido = re.sub(r"^\\\[|\\\]$|^\$\$|\$\$$|^\\\(|\\\)$|^\$|\$$", "", p).strip()
                     st.latex(latex_transform(contenido))
                 elif p:
                     st.write(preprocess_nonmath_segment(p))
             continue
 
-        # Si NO hay delimitadores, pero parece LaTeX (heurística): renderízalo como bloque
+        # Heurística: si tiene comandos LaTeX, rendérizalo como bloque
         if LATEX_CMD_PATTERN.search(ln):
-            contenido = ln.strip()
-            if contenido:
-                st.latex(latex_transform(contenido))
-            else:
-                st.write("")
+            st.latex(latex_transform(ln.strip()))
         else:
             st.write(preprocess_nonmath_segment(ln))
 
@@ -130,15 +151,14 @@ if correo:
     if st.button("Preguntar") and pregunta.strip():
         with st.spinner("Pensando..."):
             try:
-                # NOTA: Si usas openai>=1.0, cambia este bloque por el nuevo cliente
-                response = openai.ChatCompletion.create(
+                resp = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
                         {"role": "system", "content": PEDAGOGICAL_PROMPT},
                         {"role": "user", "content": pregunta}
                     ]
                 )
-                respuesta = response["choices"][0]["message"]["content"]
+                respuesta = resp.choices[0].message.content
                 st.success("Respuesta del Chatbot:")
                 render_with_math(respuesta)
 
@@ -151,6 +171,5 @@ if correo:
     if correo == "alejandro.varas@uc.cl" and os.path.exists("registro_chat_fis109o.csv"):
         with open("registro_chat_fis109o.csv", "rb") as f:
             st.download_button("📥 Descargar registro de interacciones (.csv)", f, "registro_chat_fis109o.csv", "text/csv")
-
 else:
     st.info("Por favor, ingresa tu correo UC para comenzar.")
