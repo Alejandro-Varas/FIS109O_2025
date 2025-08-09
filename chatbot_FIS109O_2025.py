@@ -48,49 +48,48 @@ correo = st.text_input("Correo UC:")
 
 # ---------- Utilidades ----------
 def latex_transform(expr: str) -> str:
-    # Unitarios cartesianos
+    # --- Mapeos para unitarios cartesianos (i, j, k) a x, y, z ---
+    expr = re.sub(r"\\mathbf\{\s*i\s*\}", r"\\hat{x}", expr)
+    expr = re.sub(r"\\mathbf\{\s*j\s*\}", r"\\hat{y}", expr)
+    expr = re.sub(r"\\mathbf\{\s*k\s*\}", r"\\hat{z}", expr)
+    # Variantes: \hat{i}, \hat{\imath}, \vec{i}
+    expr = re.sub(r"(\\hat\{\s*i\s*\}|\\hat\s+i\b|\\hat\{\s*\\imath\s*\}|\\vec\{\s*i\s*\}|\\vec\s+i\b)", r"\\hat{x}", expr)
+    expr = re.sub(r"(\\hat\{\s*j\s*\}|\\hat\s+j\b|\\hat\{\s*\\jmath\s*\}|\\vec\{\s*j\s*\}|\\vec\s+j\b)", r"\\hat{y}", expr)
+    expr = re.sub(r"(\\hat\{\s*k\s*\}|\\hat\s+k\b|\\vec\{\s*k\s*\}|\\vec\s+k\b)", r"\\hat{z}", expr)
+
+    # --- Unitarios con x,y,z explícitos ---
     expr = re.sub(r"\\mathbf\{\s*([xyzXYZ])\s*\}", lambda m: f"\\hat{{{m.group(1).lower()}}}", expr)
     expr = re.sub(r"\\hat\s+([A-Za-z])", r"\\hat{\1}", expr)
-    # Vectores generales
-    expr = re.sub(r"\\mathbf\{\s*([A-Za-wA-W])\s*\}", r"\\vec{\1}", expr)
+
+    # --- Vectores generales ---
+    expr = re.sub(r"\\mathbf\{\s*([A-Za-z])\s*\}", r"\\vec{\1}", expr)
     expr = re.sub(r"\\vec\s+([A-Za-z])", r"\\vec{\1}", expr)
+
     return expr
 
 def preprocess_nonmath_segment(seg: str) -> str:
-    seg = re.sub(r"\*\*([A-Za-z])\*\*", r"$\\vec{\1}$", seg)
-    seg = re.sub(r"\b([A-Za-z])_([A-Za-z0-9]+)\b", r"$\1_{\2}$", seg)
-    seg = re.sub(r"(?i)(vector)\s+([a-zA-Z])(\b)", r"\1 $\\vec{\2}$\3", seg)
-    seg = re.sub(r"\(\s*([A-Za-z])\s*\)", r"$(\1)$", seg)
+    seg = re.sub(r"\*\*([A-Za-z])\*\*", r"$\\vec{\1}$", seg)  # **v** -> \vec{v}
+    seg = re.sub(r"\b([A-Za-z])_([A-Za-z0-9]+)\b", r"$\1_{\2}$", seg)  # v_x -> v_{x}
+    seg = re.sub(r"(?i)(vector)\s+([a-zA-Z])(\b)", r"\1 $\\vec{\2}$\3", seg)  # "vector v" -> \vec{v}
+    seg = re.sub(r"\(\s*([A-Za-z])\s*\)", r"$(\1)$", seg)  # ( x ) -> $(x)$
     return seg
 
 def render_with_math(texto: str):
-    texto = re.sub(r"(?ms)^\[\s*\n(.*?)\n\s*\]$", r"\\[\1\\]", texto)
-    lineas = texto.split("\n")
-    en_bloque_corchetes = False
-    acumulador = []
-    for ln in lineas:
-        s = ln.strip()
-        if not en_bloque_corchetes and s == "[":
-            en_bloque_corchetes = True
-            acumulador = []
-            continue
-        if en_bloque_corchetes:
-            if s == "]":
-                bloque = "\n".join(acumulador).strip()
-                st.latex(latex_transform(bloque))
-                en_bloque_corchetes = False
-            else:
-                acumulador.append(ln)
+    # Normalizar bloques [...] en cualquier parte del texto
+    texto = re.sub(r"(?s)\[\s*\n(.*?)\n\s*\]", r"\\[\1\\]", texto)
+
+    for ln in texto.split("\n"):
+        # Separar por entornos matemáticos inline/bloque
+        partes = re.split(r"(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\])", ln)
+        if len(partes) > 1:
+            for p in partes:
+                if re.fullmatch(r"\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]", p):
+                    contenido = re.sub(r"^\\\[|\\\]$|^\$\$|\$\$$|^\$|\$$", "", p).strip()
+                    st.latex(latex_transform(contenido))
+                else:
+                    st.write(preprocess_nonmath_segment(p))
         else:
-            partes = re.split(r"(\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\])", ln)
-            if len(partes) > 1:
-                for p in partes:
-                    if re.fullmatch(r"\$\$.*?\$\$|\$.*?\$|\\\[.*?\\\]", p):
-                        st.latex(latex_transform(re.sub(r"^\\\[|\\\]$|^\$\$|\$\$$", "", p).strip()))
-                    else:
-                        st.write(preprocess_nonmath_segment(p))
-            else:
-                st.write(preprocess_nonmath_segment(ln))
+            st.write(preprocess_nonmath_segment(ln))
 
 # ---------- Lógica principal ----------
 if correo:
@@ -114,6 +113,7 @@ if correo:
                 respuesta = response["choices"][0]["message"]["content"]
                 st.success("Respuesta del Chatbot:")
                 render_with_math(respuesta)
+
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 with open("registro_chat_fis109o.csv", "a", encoding="utf-8", newline="") as f:
                     csv.writer(f).writerow([now, correo, pregunta, respuesta])
